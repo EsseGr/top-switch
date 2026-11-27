@@ -82,6 +82,7 @@ class MockAdGuard:
         self.clients = {"clients": [], "auto_clients": [], "supported_tags": ["user_child"]}
         self.down = False
         self.fail_set = False
+        self.apply_then = None  # None | "error" | "reset": set_rules is applied, then the reply fails
         self.set_calls = []
         self.unauth = 0
         outer = self
@@ -123,6 +124,11 @@ class MockAdGuard:
                         return self._reply(400, {"message": "bad"})
                     outer.set_calls.append(body)
                     outer.rules = body["rules"]
+                    if outer.apply_then == "error":  # applied, but the client sees a failure
+                        return self._reply(500, {"message": "boom"})
+                    if outer.apply_then == "reset":  # applied, connection dropped without a response
+                        self.close_connection = True
+                        return None
                     return self._reply(200)
                 return self._reply(404)
 

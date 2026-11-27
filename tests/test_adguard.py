@@ -296,6 +296,81 @@ def test_off_failure_keeps_owned_rules(tmp_path, adguard):
     assert press(core, "off").ok and adguard.rules == []
 
 
+@pytest.mark.parametrize("mode", ["error", "reset"])
+def test_set_rules_applied_but_reply_failed_becomes_owned_and_unblock_removes_it(tmp_path, adguard, mode):
+    adguard.rules = list(HAND_RULES)
+    _, state, core = make(tmp_path, adguard)
+    adguard.apply_then = mode
+    assert press(core, "on").ok  # the re-read shows both rules: not a failure
+    assert adguard.rules == HAND_RULES + [R10, R20]
+    assert state.button("kids")["owned_rules"] == [R10, R20]
+    assert state.button("kids")["pending_rules"] == []
+    adguard.apply_then = None
+    assert press(core, "off").ok
+    assert adguard.rules == HAND_RULES
+    assert state.button("kids")["owned_rules"] == []
+
+
+def test_set_rules_failed_and_not_applied_rolls_back_pending(tmp_path, adguard):
+    _, state, core = make(tmp_path, adguard)
+    adguard.fail_set = True
+    assert not press(core, "on").ok
+    assert adguard.rules == [] and state.button("kids")["pending_rules"] == []
+
+
+def test_set_rules_failed_with_partial_result_keeps_pending(tmp_path, adguard, monkeypatch):
+    adguard.rules = list(HAND_RULES)
+    _, state, core = make(tmp_path, adguard)
+    from top_switch.actions import ActionError
+
+    def half(rules):
+        adguard.rules = HAND_RULES + [R10]  # only one of the two lines shows up
+        raise ActionError("timeout")
+    monkeypatch.setattr(core.adguard, "_set_rules", half)
+    assert not press(core, "on").ok
+    assert state.button("kids")["pending_rules"] == [R10, R20]
+    assert state.button("kids").get("owned_rules", []) == []
+    assert adguard.rules == HAND_RULES + [R10]
+
+
+def test_set_rules_failed_and_reread_failed_keeps_pending(tmp_path, adguard, monkeypatch):
+    _, state, core = make(tmp_path, adguard)
+    from top_switch.actions import ActionError
+
+    def boom(rules):
+        adguard.down = True  # the verification GET fails too
+        raise ActionError("timeout")
+    monkeypatch.setattr(core.adguard, "_set_rules", boom)
+    assert not press(core, "on").ok
+    assert state.button("kids")["pending_rules"] == [R10, R20]
+
+
+def test_owned_rule_deleted_in_ui_is_dropped_without_post_and_manual_readd_survives(tmp_path, adguard):
+    adguard.rules = list(HAND_RULES)
+    _, _, core = make(tmp_path, adguard)
+    assert press(core, "on").ok
+    _, state2, core2 = build(tmp_path, adguard_yaml(adguard, '{ids: ["192.0.2.20"]}'))
+    adguard.rules = [r for r in adguard.rules if r != R10]  # old rule deleted in the AdGuard UI
+    n = len(adguard.set_calls)
+    assert core2.press("kids", "ui", None, "on").ok
+    assert len(adguard.set_calls) == n  # nothing to POST ...
+    assert state2.button("kids")["owned_rules"] == [R20]  # ... but the state is updated
+    adguard.rules = adguard.rules + [R10]  # the same line is added by hand
+    assert core2.press("kids", "ui", None, "off").ok
+    assert adguard.rules == HAND_RULES + [R10]  # the manual rule stays
+    assert state2.button("kids")["owned_rules"] == []
+
+
+def test_stale_state_update_failure_without_post_returns_error(tmp_path, adguard):
+    _, _, core = make(tmp_path, adguard)
+    assert press(core, "on").ok
+    _, state2, core2 = build(tmp_path, adguard_yaml(adguard, '{ids: ["192.0.2.20"]}'))
+    adguard.rules = [R20]
+    failing_update(state2, {1})
+    res = core2.press("kids", "ui", None, "on")
+    assert not res.ok and "state.json" in res.body["error"]
+
+
 def test_persistent_clients_are_expanded_on_every_press(tmp_path, adguard):
     adguard.clients["clients"] = [{"name": "Tablet", "ids": ["192.0.2.50"]}]
     _, _, core = make(tmp_path, adguard, '{clients: ["Tablet"]}')

@@ -212,6 +212,15 @@ class AdGuard:
                        "χειροκίνητα στα user rules· δεν διαγράφονται αυτόματα")
         return out
 
+    def _applied(self, rules):
+        """True if all rules are in the user rules now, False if none is, None if mixed or unreadable."""
+        try:
+            present = set(self._user_rules()[0])
+        except ActionError:
+            return None
+        found = [r in present for r in rules]
+        return True if all(found) else False if not any(found) else None
+
     @staticmethod
     def _without_last(rules, targets):
         """Copy of rules minus the last occurrence of each target (the one we appended)."""
@@ -237,7 +246,17 @@ class AdGuard:
                 present = set(rules)
                 missing = [r for r in wanted if r not in present]  # a manual rule is never added nor owned
                 stale = [r for r in owned if r not in wanted and r in present]
-                if missing or stale:
+                # owned rules no longer wanted that are gone from AdGuard (deleted in the UI) stop being owned,
+                # so a later manual re-add of the same line is never ours
+                owned_after = _dedupe([r for r in owned if r in wanted] + missing)
+                if not (missing or stale):
+                    if owned_after != owned:
+                        try:
+                            self._set_state(button_id, owned_rules=owned_after)
+                        except OSError as exc:
+                            log.error("button %s: state.json could not be written: %s", button_id, exc)
+                            return {"ok": False, "error": f"δεν ενημερώθηκε το state.json (αποτυχία εγγραφής: {exc})"}
+                else:
                     new_pending = [r for r in missing if r not in owned]
                     if new_pending:
                         try:
@@ -249,19 +268,27 @@ class AdGuard:
                                                           f"στον AdGuard (αποτυχία εγγραφής: {exc})"}
                     try:
                         self._set_rules(self._without_last(rules, stale) + missing)
-                    except ActionError:
-                        if new_pending:
-                            try:
-                                self._set_state(button_id, pending_rules=pending)
-                            except OSError as exc:
-                                log.error("button %s: set_rules failed and the pending rollback failed too; "
-                                          "rules %s stay pending: %s", button_id, new_pending, exc)
-                                return {"ok": False, "error": "αποτυχία set_rules και αποτυχία εγγραφής state.json "
-                                                              f"({exc}): έμεινε pending κανόνας {', '.join(new_pending)}"}
-                        raise
+                    except ActionError as exc:
+                        # a timeout/reset does not say whether AdGuard applied the rules: look before deciding
+                        applied = self._applied(new_pending) if new_pending else False
+                        if applied is not True:
+                            if new_pending and applied is False:
+                                try:
+                                    self._set_state(button_id, pending_rules=pending)
+                                except OSError as oserr:
+                                    log.error("button %s: set_rules failed and the pending rollback failed too; "
+                                              "rules %s stay pending: %s", button_id, new_pending, oserr)
+                                    return {"ok": False, "error": "αποτυχία set_rules και αποτυχία εγγραφής "
+                                                                  f"state.json ({oserr}): έμεινε pending κανόνας "
+                                                                  f"{', '.join(new_pending)}"}
+                            elif new_pending:
+                                log.warning("button %s: set_rules failed (%s) and the result is unknown; rules %s "
+                                            "stay pending", button_id, exc, new_pending)
+                            raise
+                        log.warning("button %s: set_rules reported %s but all rules are present: treated as applied",
+                                    button_id, exc)
                     try:
-                        self._set_state(button_id,
-                                        owned_rules=_dedupe([r for r in owned if r not in stale] + missing),
+                        self._set_state(button_id, owned_rules=owned_after,
                                         pending_rules=[r for r in pending if r not in missing])
                     except OSError as exc:
                         log.error("button %s: rules %s were set but state.json could not be written: %s",
