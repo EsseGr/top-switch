@@ -224,7 +224,13 @@ class AdGuard:
                     b = d["buttons"].setdefault(button_id, {})
                     b["owned_ids"] = []
                     b["recovered"] = True
-                self.state.update(fn)
+                try:
+                    self.state.update(fn)
+                except OSError as exc:
+                    log.error("button %s: ids %s were unblocked but state.json could not be written: %s",
+                              button_id, owned, exc)
+                    return {"ok": False, "error": "τα ids αφαιρέθηκαν αλλά δεν ενημερώθηκε το state.json "
+                                                  f"(αποτυχία εγγραφής: {exc}) — τα owned_ids μένουν ως είχαν"}
         except (SelectorError, ActionError) as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "warnings": []}

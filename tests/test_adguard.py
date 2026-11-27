@@ -233,3 +233,16 @@ def test_plugin_clients_endpoint_lists_runtime_and_persistent(tmp_path, adguard,
     assert code == 200
     assert [c["blockable"] for c in body["persistent"]] == [True, False]
     assert body["runtime"][0]["ids"] == ["192.0.2.9"]
+
+
+def test_state_write_failure_on_unblock_returns_clear_error(tmp_path, adguard, monkeypatch):
+    _, state, core = make(tmp_path, adguard)
+    assert press(core, "on").ok
+
+    def boom(fn):
+        raise OSError("disk full")
+    monkeypatch.setattr(state, "update", boom)
+    res = press(core, "off")
+    assert not res.ok and res.http_status == 502
+    assert "δεν ενημερώθηκε το state.json" in res.body["error"]
+    assert adguard.disallowed == []  # the ids really were unblocked

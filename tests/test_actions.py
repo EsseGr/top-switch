@@ -96,3 +96,20 @@ def test_script_symlink_escape_is_blocked_at_load_and_at_run(tmp_path):
 def test_script_missing_file(tmp_path):
     (tmp_path / "scripts").mkdir()
     assert not cfg_with(tmp_path, "{type: script, script: nope.sh}").press("s", "ui", None).ok
+
+
+@pytest.mark.parametrize("where", ["run", "record_press"])
+def test_unexpected_exception_is_logged_and_502(tmp_path, httpmock, monkeypatch, where):
+    httpmock.routes[("POST", "/hook")] = (200, b"{}")
+    cfg, state, core = build(tmp_path, HOOK % httpmock.url)
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+    if where == "run":
+        monkeypatch.setattr(core, "_run", boom)
+    else:
+        monkeypatch.setattr(state, "record_press", boom)
+    res = core.press("h", "ui", "192.0.2.9")
+    assert not res.ok and res.http_status == 502 and "disk full" in res.body["error"]
+    lines = [json.loads(l) for l in cfg.log_path.read_text().splitlines()]
+    assert lines[-1]["button"] == "h" and lines[-1]["result"] == "error" and "disk full" in lines[-1]["error"]

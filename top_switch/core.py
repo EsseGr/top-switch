@@ -117,7 +117,11 @@ class Core:
                     raise Conflict(UNKNOWN_MSG)
                 desired = "off" if current == "on" else "on"  # off and partial -> on
             spec = button.toggle[desired]
-        result = self._run(button, spec)
+        try:
+            result = self._run(button, spec)
+        except Exception as exc:  # noqa: BLE001 — every press must reach the press log
+            log.exception("button %s: unexpected error while running the action", button_id)
+            result = {"ok": False, "error": f"απρόσμενο σφάλμα στην ενέργεια: {type(exc).__name__}: {exc}"}
         now = datetime.now(timezone.utc).isoformat()
         rec = {"button": button_id, "time": now, "source": source, "ip": ip, "desired": desired,
                "result": "ok" if result["ok"] else "error"}
@@ -125,6 +129,13 @@ class Core:
             rec["error"] = result["error"]
         self.plog.write(rec)
         if result["ok"]:
-            self.state.record_press(button_id, now, source)
+            try:
+                self.state.record_press(button_id, now, source)
+            except Exception as exc:  # noqa: BLE001
+                log.exception("button %s: the action ran but last_pressed could not be saved", button_id)
+                self.plog.write({"button": button_id, "time": now, "source": source, "ip": ip, "desired": desired,
+                                 "result": "error", "error": f"state.json: {exc}"})
+                return PressResult(False, 502, {"ok": False,
+                                                "error": f"η ενέργεια έγινε αλλά δεν αποθηκεύτηκε το state.json: {exc}"})
             return PressResult(True, 200, {"ok": True, "desired": desired, "warnings": result.get("warnings", [])})
         return PressResult(False, 502, {"ok": False, "error": result["error"]})
