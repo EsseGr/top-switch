@@ -6,12 +6,15 @@ POST /control/access/set (read-modify-write); ownership is tracked per button in
 import base64
 import ipaddress
 import json
+import logging
 import re
 import threading
 from abc import ABC, abstractmethod
 
 from ..actions import ActionError, http_request
 from ..status import unknown
+
+log = logging.getLogger("top_switch.adguard")
 
 LOST_WARNING = "χάθηκε το state — μπορεί να έχουν μείνει ids μπλοκαρισμένα (δες foreign)"
 
@@ -192,7 +195,13 @@ class AdGuard:
                 def fn(d):
                     b = d["buttons"].setdefault(button_id, {})
                     b["owned_ids"] = _dedupe(list(b.get("owned_ids") or []) + missing)
-                self.state.update(fn)
+                try:
+                    self.state.update(fn)
+                except OSError as exc:
+                    log.error("button %s: ids %s were blocked but state.json could not be written: %s",
+                              button_id, missing, exc)
+                    return {"ok": False, "error": "τα ids μπλοκαρίστηκαν αλλά δεν καταγράφηκαν ως owned "
+                                                  f"(αποτυχία εγγραφής state.json: {exc}) — δες foreign"}
         except (SelectorError, ActionError) as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "warnings": self._warnings(button_id)}

@@ -121,6 +121,18 @@ def test_failed_set_does_not_record_ownership(tmp_path, adguard):
     assert state.button("kids").get("owned_ids", []) == []
 
 
+def test_state_write_failure_after_set_returns_clear_error(tmp_path, adguard, monkeypatch):
+    _, state, core = make(tmp_path, adguard)
+
+    def boom(fn):
+        raise OSError("disk full")
+    monkeypatch.setattr(state, "update", boom)
+    res = press(core, "on")
+    assert not res.ok
+    assert "δεν καταγράφηκαν ως owned" in res.body["error"]
+    assert adguard.disallowed  # the ids really were blocked
+
+
 def test_off_failure_keeps_owned_ids(tmp_path, adguard):
     _, state, core = make(tmp_path, adguard)
     press(core, "on")

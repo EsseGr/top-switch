@@ -7,7 +7,7 @@ from .config import ConfigError, load_config
 from .core import Core
 from .schedule import Scheduler
 from .server import make_server
-from .state import StateStore
+from .state import StateStore, check_writable
 
 
 def main():
@@ -20,6 +20,11 @@ def main():
         return 2
     if config.insecure:
         log.warning("!!! TOP_SWITCH_INSECURE_NO_AUTH=1 and no api_token: the API is OPEN. Development only !!!")
+    try:
+        check_writable(config.state_path, config.log_path)
+    except OSError as exc:
+        log.error("startup check failed: %s (the container runs as uid 1000: chown the ./data bind mount)", exc)
+        return 2
     state = StateStore(config.state_path)
     core = Core(config, state)
     Scheduler(core, config, state).start()

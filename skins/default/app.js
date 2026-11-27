@@ -5,8 +5,12 @@ const $ = (id) => document.getElementById(id);
 
 // Token from "#token=..." link: store it and clear the fragment immediately.
 if (location.hash.startsWith("#token=")) {
-  const t = decodeURIComponent(location.hash.slice(7));
-  if (t) localStorage.setItem(KEY, t);
+  try {
+    const t = decodeURIComponent(location.hash.slice(7));
+    if (t) localStorage.setItem(KEY, t);
+  } catch (e) {
+    // malformed percent-encoding: ignore the token; the login field stays available
+  }
   history.replaceState(null, "", location.pathname + location.search);
 }
 

@@ -14,6 +14,21 @@ def _empty():
     return {"version": 1, "lost": False, "buttons": {}, "schedule": {}}
 
 
+def check_writable(state_path, log_path):
+    """Raise OSError (naming the offending path) unless state.json and the logs dir are writable."""
+    state_path, log_path = Path(state_path), Path(log_path)
+    for directory in (state_path.parent, log_path.parent):
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            probe = directory / f".write-test-{os.getpid()}"
+            probe.write_text("x")
+            probe.unlink()
+        except OSError as exc:
+            raise OSError(f"{directory} is not writable: {exc}") from exc
+    if state_path.exists() and not os.access(state_path, os.W_OK):
+        raise OSError(f"{state_path} is not writable")
+
+
 class StateStore:
     def __init__(self, path):
         self.path = Path(path)

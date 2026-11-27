@@ -68,3 +68,28 @@ def test_non_object_state_is_corrupt_too(tmp_path):
 
 def test_missing_state_is_a_normal_first_start(tmp_path):
     assert StateStore(tmp_path / "state.json").snapshot()["lost"] is False
+
+
+def test_check_writable_ok_and_creates_dirs(tmp_path):
+    from top_switch.state import check_writable
+    check_writable(tmp_path / "state.json", tmp_path / "logs" / "x.jsonl")
+    assert (tmp_path / "logs").is_dir()
+
+
+def test_check_writable_fails_with_clear_message(tmp_path):
+    import pytest
+    from top_switch.state import check_writable
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    with pytest.raises(OSError, match="not writable"):
+        check_writable(blocker / "state.json", tmp_path / "logs" / "x.jsonl")
+
+
+def test_main_exits_cleanly_when_state_not_writable(tmp_path, monkeypatch):
+    from top_switch.__main__ import main
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(f"api_token: x\nstate_file: {blocker}/state.json\nbuttons: []\n")
+    monkeypatch.setenv("TOP_SWITCH_CONFIG", str(cfg))
+    assert main() == 2
