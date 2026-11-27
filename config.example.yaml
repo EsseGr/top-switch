@@ -19,11 +19,11 @@ buttons:
         type: plugin
         plugin: adguard.block
         selector: &kids                # static selector; the API never accepts devices from the client
-          ids: ["192.0.2.10", "192.0.2.0/28", "my-client-id"]   # IP, CIDR or ClientID (never MAC)
-          clients: ["Example Persistent Client"]                # persistent client names (expanded on every use)
+          ids: ["192.0.2.10", "192.0.2.11"]                     # plain IPv4 only (no MAC, CIDR, IPv6 or ClientID)
+          clients: ["Example Persistent Client"]                # persistent client names (all their ids must be plain IPv4)
       off:
         type: plugin
-        plugin: adguard.unblock        # removes only the ids this button added (tracked in state.json)
+        plugin: adguard.unblock        # removes only the user rules this button added (tracked in state.json)
       status:
         type: plugin
         plugin: adguard.status
