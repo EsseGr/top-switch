@@ -71,17 +71,19 @@ class MockHttp:
 
 
 class MockAdGuard:
-    """Follows AdGuard Home v0.107.79 openapi: basic auth, /control/access/{list,set}, /control/clients."""
+    """Follows AdGuard Home v0.107.79 openapi: basic auth, GET /control/filtering/status (user_rules),
+    POST /control/filtering/set_rules ({rules: [str]}), /control/clients. There is deliberately no access-list endpoint."""
 
     USER, PASSWORD = "u", "p"
 
     def __init__(self):
-        self.acl = {"allowed_clients": [], "disallowed_clients": [], "blocked_hosts": ["example.invalid"]}
+        self.rules = []  # user_rules, stored and returned verbatim (comments and blank lines included)
+        self.filtering_enabled = True
         self.clients = {"clients": [], "auto_clients": [], "supported_tags": ["user_child"]}
         self.down = False
         self.fail_set = False
+        self.apply_then = None  # None | "error" | "reset": set_rules is applied, then the reply fails
         self.set_calls = []
-        self.get_acl_calls = 0
         self.unauth = 0
         outer = self
         expected = "Basic " + base64.b64encode(f"{self.USER}:{self.PASSWORD}".encode()).decode()
@@ -106,19 +108,27 @@ class MockAdGuard:
                 if self.headers.get("Authorization") != expected:
                     outer.unauth += 1
                     return self._reply(401)
-                if self.command == "GET" and self.path == "/control/access/list":
-                    outer.get_acl_calls += 1
-                    return self._reply(200, outer.acl)
+                if self.command == "GET" and self.path == "/control/filtering/status":
+                    return self._reply(200, {"enabled": outer.filtering_enabled, "interval": 24, "filters": [],
+                                             "whitelist_filters": [], "user_rules": outer.rules})
                 if self.command == "GET" and self.path == "/control/clients":
                     return self._reply(200, outer.clients)
-                if self.command == "POST" and self.path == "/control/access/set":
-                    body = json.loads(raw)
-                    ok = (set(body) >= {"allowed_clients", "disallowed_clients", "blocked_hosts"}
-                          and all(isinstance(body[k], list) for k in body))
+                if self.command == "POST" and self.path == "/control/filtering/set_rules":
+                    try:
+                        body = json.loads(raw)
+                    except ValueError:
+                        body = None
+                    ok = (isinstance(body, dict) and set(body) <= {"rules"} and isinstance(body.get("rules"), list)
+                          and all(isinstance(r, str) for r in body["rules"]))
                     if outer.fail_set or not ok:
                         return self._reply(400, {"message": "bad"})
                     outer.set_calls.append(body)
-                    outer.acl = body
+                    outer.rules = body["rules"]
+                    if outer.apply_then == "error":  # applied, but the client sees a failure
+                        return self._reply(500, {"message": "boom"})
+                    if outer.apply_then == "reset":  # applied, connection dropped without a response
+                        self.close_connection = True
+                        return None
                     return self._reply(200)
                 return self._reply(404)
 
@@ -126,10 +136,6 @@ class MockAdGuard:
 
         self._srv = _Srv(H)
         self.url = self._srv.url
-
-    @property
-    def disallowed(self):
-        return self.acl["disallowed_clients"]
 
     def close(self):
         self._srv.close()

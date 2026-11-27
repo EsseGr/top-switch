@@ -46,17 +46,40 @@ framework για 4 routes, και κάθε εξάρτηση λιγότερη ε�
 
 ## Plugin AdGuard Home
 
-Δοκιμασμένο ως προς το schema του v0.107.79. Μπλοκάρει μέσω `GET /control/access/list` +
-`POST /control/access/set`, αλλάζοντας **μόνο** τα δικά του entries στο `disallowed_clients`
-(όλα τα άλλα πεδία μένουν ως έχουν). Ο selector (`ids` και/ή `clients`) μπαίνει στο config.
-Επιτρεπτά ids: IP, CIDR, ClientID· **MAC δεν επιτρέπεται** (απόρριψη στη φόρτωση ή, για persistent
-clients, απενεργοποίηση του κουμπιού με error στο press/status — ποτέ μερικό μπλοκάρισμα).
-Το `state.json` κρατά ανά κουμπί τα `owned_ids`: το `off` αφαιρεί ακριβώς αυτά. Αν το state χαθεί,
-το off δεν αφαιρεί τίποτα και εμφανίζεται προειδοποίηση· τα μπλοκαρισμένα ids φαίνονται στο `foreign`.
+Schema v0.107.79. Μπλοκάρει με κανόνες ανά συσκευή στα **user rules** του AdGuard, μορφή
+`/.*/$client=<ip>` (`GET /control/filtering/status`, πεδίο `user_rules`, και
+`POST /control/filtering/set_rules` με σώμα `{"rules": [...]}`, read-modify-write). Δεν χρησιμοποιείται
+πια το `disallowed_clients` (στο Pi η συσκευή έπαιρνε 0.0.0.0 και δεν πήγαινε στον εφεδρικό DNS του router).
 
-Παραδοχές (δεν επιβεβαιώνονται offline): η πρόσβαση στο host από container μέσω `host-gateway`·
-η συμπεριφορά του `/access/set` σε μη έγκυρες τιμές (αν αποτύχει → error, το state δεν αλλάζει)·
-το read-modify-write δεν είναι ατομικό στον AdGuard (αλλαγή ανάμεσα σε GET και POST μπορεί να χαθεί).
+- **Επιτρεπτά ids:** μόνο απλή IPv4 (π.χ. `192.0.2.10`, χωρίς μηδενικά μπροστά ή κενά). Ο κανόνας
+  παράγεται μόνο από αυτή τη μορφή, ποτέ από ελεύθερο κείμενο. MAC → σφάλμα στη φόρτωση του config.
+  CIDR, IPv6 και ClientID **δεν ρίχνουν την υπηρεσία**: γράφεται warning στο startup και μόνο το
+  συγκεκριμένο κουμπί απενεργοποιείται (status `unknown` με error, block με `ok:false`, δεν στέλνεται τίποτα).
+  Persistent clients: όλα τα ids τους πρέπει να είναι απλή IPv4, αλλιώς όλο το κουμπί απενεργοποιείται.
+- **Ownership:** το `state.json` κρατά ανά κουμπί `owned_rules` και `pending_rules`. Το `block` προσθέτει
+  (στο τέλος) μόνο όσους κανόνες λείπουν και τους καταγράφει ως owned· ένας κανόνας που υπάρχει ήδη
+  (π.χ. χειροκίνητος) δεν προστίθεται και **δεν γίνεται owned**. Το `unblock` αφαιρεί μόνο τους owned κανόνες
+  (την τελευταία εμφάνιση του καθενός). Όταν αλλάζουν τα ids του selector, το επόμενο block αφαιρεί τους
+  owned κανόνες που δεν ισχύουν πια. Όλες οι άλλες γραμμές (σχόλια, κενές, σειρά) περνούν αυτούσιες.
+- **Pending:** ο κανόνας γράφεται στο `pending_rules` *πριν* το POST και γίνεται owned μετά την
+  επιτυχία. Αν το POST αποτύχει γίνεται επαναφορά· αν αποτύχει και αυτή, επιστρέφεται error και ο κανόνας
+  μένει pending. Οι pending κανόνες δεν διαγράφονται ούτε προάγονται αυτόματα· εμφανίζονται ως προειδοποίηση.
+- **Αποτυχία εγγραφής `state.json`** (block και unblock): `{ok:false, error}`, log.error και εγγραφή στο
+  log πατημάτων (`result: error`).
+- **Status:** `on` αν όλα τα ids έχουν κανόνα, `off` αν κανένα, αλλιώς `partial` (το press από partial → on).
+  Αποτυχία GET ή selector → `unknown` + error. Στο `foreign` μπαίνουν οι κανόνες που υπάρχουν αλλά δεν είναι
+  owned. Αν το φιλτράρισμα του AdGuard είναι ανενεργό, προστίθεται προειδοποίηση.
+
+### Μετάβαση από PR #1
+
+Το PR #1 έγραφε στο `disallowed_clients` και κρατούσε `owned_ids`. Αυτά **δεν αγγίζονται** ούτε
+καθαρίζονται αυτόματα. Αν το `state.json` έχει μη κενά `owned_ids`, τα status/block/unblock δείχνουν
+προειδοποίηση· καθάρισέ τα χειροκίνητα στο AdGuard → Settings → DNS → Access settings.
+
+Παραδοχές (δεν επιβεβαιώνονται offline): το mock ακολουθεί μόνο το openapi· ο AdGuard μπορεί να
+κανονικοποιεί τα user rules· το read-modify-write δεν είναι ατομικό (αλλαγή από το UI ανάμεσα σε GET και POST
+μπορεί να χαθεί)· ο κανόνας `$client` με IP δεν καλύπτει συσκευές που αλλάζουν IP (DHCP)· η πρόσβαση στο
+host από container μέσω `host-gateway`.
 
 **Κανόνας «συσκευές εκτός Tailscale»: stub.** Υπάρχει μόνο το σημείο επέκτασης
 (`Selector.resolve()` στο `top_switch/plugins/adguard.py`)· δεν υλοποιείται.
