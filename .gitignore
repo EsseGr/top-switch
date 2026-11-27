@@ -1,0 +1,14 @@
+# local / secrets
+/config.yaml
+/data/
+state.json
+state.json.*
+*.log
+*.jsonl
+logs/
+.env
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

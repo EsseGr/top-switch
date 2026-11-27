@@ -1,0 +1,17 @@
+services:
+  top-switch:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      TZ: Europe/Athens
+      TOP_SWITCH_API_TOKEN: ${TOP_SWITCH_API_TOKEN}
+      ADGUARD_URL: ${ADGUARD_URL}
+      ADGUARD_USERNAME: ${ADGUARD_USERNAME}
+      ADGUARD_PASSWORD: ${ADGUARD_PASSWORD}
+    volumes:
+      # ./data holds config.yaml, state.json, scripts/ and logs/
+      - ./data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
