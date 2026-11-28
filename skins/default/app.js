@@ -184,9 +184,9 @@ function groupCard(g, byId) {
   head.append(el("div", "emoji", g.icon), title);
   if (g.all_switch) head.append(switchFor(st.state, g.name + ": όλες", (d, c) => toggleGroup(g, d, c)));
   box.append(head);
-  const list = el("ul", "devices");
+  const list = el("ul", "devices in-group");
   members.forEach((b) => {
-    const row = el("li", "device");
+    const row = el("li", "device in-group");
     const t = el("div", "title");
     t.append(el("h2", "", b.name));
     const s = el("div", "sub");
@@ -196,7 +196,7 @@ function groupCard(g, byId) {
     row.append(el("div", "emoji", b.icon), t, switchFor(b.status.state, b.name, (d, c) => toggleButton(b, d, c)));
     list.append(row);
     if (b.status.error || (b.status.warnings || []).length || (b.status.foreign || []).length) {
-      const n = el("li", "device notes");
+      const n = el("li", "device notes in-group");
       notes(n, b.status);
       list.append(n);
     }

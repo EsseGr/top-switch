@@ -38,6 +38,18 @@ h1 { font-size: 1.25rem; margin: 0; letter-spacing: .01em; }
 .device:last-child { border-bottom: 0; padding-bottom: 0; }
 .device .emoji { font-size: 1.3rem; }
 .ip { font-variant-numeric: tabular-nums; }
+/* devices inside a group: indented under the group header, switch stays at the right edge */
+.devices.in-group { margin-left: 1.75rem; border-left: 2px solid var(--line); }
+.device.in-group { padding-left: .75rem; }
+.device.in-group .emoji { font-size: 1.15rem; width: 1.9rem; }
+.device.in-group .title h2 { font-size: .95rem; overflow-wrap: anywhere; }
+.device.in-group .ip { overflow-wrap: anywhere; }
+.device.notes.in-group { padding-left: .75rem; }
+@media (max-width: 380px) {
+  .devices.in-group { margin-left: 1.5rem; }
+  .device.in-group { gap: .5rem; padding-left: .5rem; }
+  .device.notes.in-group { padding-left: .5rem; }
+}
 /* switch */
 .switch { position: relative; width: 3.25rem; height: 1.9rem; flex: none; border: 0; padding: 0; border-radius: 999px;
           background: var(--track); cursor: pointer; transition: background .2s; }
