@@ -77,7 +77,20 @@ def make_server(core, config, host="0.0.0.0", port=8000):
                 if parts == ["buttons"]:
                     if method != "GET":
                         return self._send(405, {"error": "method not allowed"}, {"Allow": "GET"})
-                    return self._send(200, {"insecure": config.insecure, "buttons": core.buttons_view()})
+                    buttons = core.buttons_view()
+                    return self._send(200, {"insecure": config.insecure, "buttons": buttons,
+                                            "groups": core.groups_view(buttons)})
+                if len(parts) == 2 and parts[0] == "groups":
+                    if method != "POST":
+                        return self._send(405, {"error": "method not allowed"}, {"Allow": "POST"})
+                    body = self._read_json()
+                    if not isinstance(body, dict) or set(body) - {"desired"}:
+                        raise Invalid("body must be an object with only 'desired'")
+                    if "desired" in body and body["desired"] not in ("on", "off"):
+                        raise Invalid("desired must be 'on' or 'off'")
+                    result = core.press_group(parts[1], source="ui", ip=self.client_address[0],
+                                              desired=body.get("desired"))
+                    return self._send(result.http_status, result.body)
                 if len(parts) == 2 and parts[0] == "press":
                     if method != "POST":
                         return self._send(405, {"error": "method not allowed"}, {"Allow": "POST"})

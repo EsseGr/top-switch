@@ -41,6 +41,21 @@ class Button:
     action: dict = None
     toggle: dict = None  # {"on": spec, "off": spec, "status": spec|None}
     schedule: list = field(default_factory=list)
+    group: str = None  # id of a group (e.g. a device group); None = stand-alone
+    labels: dict = None  # optional {"on": text, "off": text} shown by the skin instead of on/off
+    uses: list = field(default_factory=list)  # integrations this button needs (http, script, webhook, adguard)
+    detail: str = None  # short extra text for the skin (a device's IP)
+
+
+@dataclass
+class Group:
+    id: str
+    name: str
+    icon: str = ""
+    confirm: object = False
+    all_switch: bool = True  # show a master switch that presses every member
+    integration: str = None
+    members: list = field(default_factory=list)  # button ids, in config order
 
 
 @dataclass
@@ -55,6 +70,7 @@ class Config:
     scripts_dir: Path
     skins_dir: Path
     skin: str
+    groups: list = field(default_factory=list)
 
 
 def _lookup(name, env):
@@ -142,6 +158,24 @@ def _check_action(spec, where, scripts_dir, plugins, status=False):
     return spec
 
 
+def _uses(spec):
+    if not spec:
+        return None
+    if spec["type"] in ("http", "script"):
+        return spec["type"]
+    name = spec.get("plugin", "")
+    return "webhook" if name == "webhook.call" else name.split(".", 1)[0]
+
+
+def _labels(raw, where):
+    labels = raw.get("labels")
+    if labels is None:
+        return None
+    if not isinstance(labels, dict) or set(labels) - {"on", "off"} or not all(isinstance(v, str) for v in labels.values()):
+        raise ConfigError(f"{where}: 'labels' must be a mapping with text 'on' and/or 'off'")
+    return dict(labels)
+
+
 def _need_adguard(where, plugins):
     cfg = plugins.get("adguard")
     if not isinstance(cfg, dict) or not all(cfg.get(k) for k in ("url", "username", "password")):
@@ -175,6 +209,9 @@ def _button(raw, scripts_dir, plugins):
             "status": _check_action(t["status"], f"{where}.toggle.status", scripts_dir, plugins, status=True)
             if t.get("status") else None,
         }
+    btn.labels = _labels(raw, where)
+    specs = [btn.action] if btn.action else [btn.toggle["on"], btn.toggle["off"], btn.toggle["status"]]
+    btn.uses = list(dict.fromkeys(u for u in map(_uses, specs) if u))
     if "schedule" in raw:
         if btn.toggle is None:
             raise ConfigError(f"{where}: schedule requires a toggle")
@@ -183,6 +220,60 @@ def _button(raw, scripts_dir, plugins):
         except ValueError as exc:
             raise ConfigError(f"{where}: schedule: {exc}") from None
     return btn
+
+
+_DEVICE_KEYS = {"id", "name", "ip", "icon", "confirm"}
+_GROUP_KEYS = {"id", "name", "icon", "confirm", "all_switch", "integration", "labels", "devices"}
+
+
+def _device_group(raw, plugins):
+    """Shorthand: one AdGuard toggle per device + an optional master switch for the group.
+
+    Expands to ordinary buttons (id = device id) so press/status/ownership work exactly like any other
+    adguard toggle; the master switch only presses the members (no shared ownership of rules).
+    """
+    if not isinstance(raw, dict) or set(raw) - _GROUP_KEYS:
+        raise ConfigError(f"device group: unknown keys {sorted(set(raw) - _GROUP_KEYS) if isinstance(raw, dict) else raw!r}"
+                          f" (allowed: {', '.join(sorted(_GROUP_KEYS))})")
+    gid = raw.get("id")
+    if not isinstance(gid, str) or not _ID.match(gid):
+        raise ConfigError(f"invalid device group id {gid!r} (use letters, digits, _ and -)")
+    where = f"device group {gid}"
+    if not raw.get("name"):
+        raise ConfigError(f"{where}: 'name' is required")
+    integration = raw.get("integration", "adguard")
+    if integration != "adguard":
+        raise ConfigError(f"{where}: integration {integration!r} is not supported (only 'adguard')")
+    _need_adguard(where, plugins)
+    devices = raw.get("devices")
+    if not isinstance(devices, list) or not devices:
+        raise ConfigError(f"{where}: 'devices' must be a non-empty list")
+    all_switch = raw.get("all_switch", True)
+    if not isinstance(all_switch, bool):
+        raise ConfigError(f"{where}: 'all_switch' must be true or false")
+    confirm = raw.get("confirm", False)
+    if not isinstance(confirm, (bool, str)):
+        raise ConfigError(f"{where}: 'confirm' must be true or a question text")
+    labels = _labels(raw, where) or {"on": "Κομμένο", "off": "Ελεύθερο"}
+    group = Group(gid, str(raw["name"]), str(raw.get("icon") or ""), confirm, all_switch, integration)
+    buttons = []
+    for d in devices:
+        if not isinstance(d, dict) or set(d) - _DEVICE_KEYS:
+            raise ConfigError(f"{where}: each device is a mapping with {', '.join(sorted(_DEVICE_KEYS))}")
+        selector = {"ids": [d.get("ip")]}
+        btn = _button({"id": d.get("id"), "name": d.get("name"), "icon": d.get("icon", ""),
+                       "confirm": d.get("confirm", False), "labels": labels,
+                       "toggle": {"on": {"type": "plugin", "plugin": "adguard.block", "selector": selector},
+                                  "off": {"type": "plugin", "plugin": "adguard.unblock"},
+                                  "status": {"type": "plugin", "plugin": "adguard.status", "selector": selector}}},
+                      None, plugins)
+        if btn.toggle["on"]["selector"].invalid_reason:
+            raise ConfigError(f"{where}: device {btn.id}: {btn.toggle['on']['selector'].invalid_reason}")
+        btn.group = gid
+        btn.detail = d["ip"]
+        group.members.append(btn.id)
+        buttons.append(btn)
+    return group, buttons
 
 
 def load_config(path, env=None):
@@ -209,14 +300,27 @@ def load_config(path, env=None):
 
     base = path.resolve().parent
     scripts_dir = base / raw.get("scripts_dir", "scripts")
-    plugins = raw.get("plugins") or {}
-    buttons, seen = [], set()
-    for item in raw.get("buttons") or []:
-        btn = _button(item, scripts_dir, plugins)
-        if btn.id in seen:
-            raise ConfigError(f"duplicate button id {btn.id!r}")
-        seen.add(btn.id)
-        buttons.append(btn)
+    if raw.get("plugins") and raw.get("integrations"):
+        raise ConfigError("use either 'integrations' or the older name 'plugins', not both")
+    plugins = raw.get("integrations") or raw.get("plugins") or {}
+    if not isinstance(plugins, dict) or set(plugins) - {"adguard"}:
+        raise ConfigError("integrations: only 'adguard' needs settings (http, webhook and script need none)")
+    buttons, seen, groups = [], set(), []
+    items = [("button", item) for item in raw.get("buttons") or []]
+    items += [("group", item) for item in raw.get("device_groups") or []]
+    for kind, item in items:
+        if kind == "button":
+            new = [_button(item, scripts_dir, plugins)]
+        else:
+            group, new = _device_group(item, plugins)
+            if group.id in {g.id for g in groups}:
+                raise ConfigError(f"duplicate device group id {group.id!r}")
+            groups.append(group)
+        for btn in new:
+            if btn.id in seen:
+                raise ConfigError(f"duplicate button/device id {btn.id!r}")
+            seen.add(btn.id)
+            buttons.append(btn)
     return Config(
         api_token=token, insecure=insecure and not token, tz=tz, buttons=buttons, plugins=plugins,
         state_path=base / raw.get("state_file", "state.json"),
@@ -224,4 +328,5 @@ def load_config(path, env=None):
         scripts_dir=scripts_dir,
         skins_dir=Path(raw["skins_dir"]) if raw.get("skins_dir") else Path(__file__).resolve().parent.parent / "skins",
         skin=str(raw.get("skin", "default")),
+        groups=groups,
     )

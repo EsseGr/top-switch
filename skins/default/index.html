@@ -2,19 +2,35 @@
 <html lang="el">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f3f4f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111318" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>top-switch</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>top-switch</h1>
+  <header class="top">
+    <h1>top-switch</h1>
+    <button id="refresh" class="icon-btn" type="button" aria-label="Ανανέωση" title="Ανανέωση">↻</button>
+  </header>
   <p id="banner" class="banner" hidden></p>
-  <form id="login" hidden>
-    <label>Token <input id="token" type="password" autocomplete="off" required></label>
+  <form id="login" class="login" hidden>
+    <label for="token">Token</label>
+    <input id="token" type="password" autocomplete="off" required>
     <button type="submit">Σύνδεση</button>
   </form>
   <p id="message" class="message" role="alert"></p>
-  <main id="buttons"></main>
+  <main id="board" aria-live="polite"></main>
+  <dialog id="ask">
+    <form method="dialog">
+      <p id="ask-text"></p>
+      <div class="dialog-row">
+        <button value="no" class="secondary">Άκυρο</button>
+        <button value="yes" id="ask-yes">Ναι</button>
+      </div>
+    </form>
+  </dialog>
   <script src="app.js"></script>
 </body>
 </html>

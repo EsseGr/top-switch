@@ -1,15 +1,28 @@
-# Example config — fake values only. Secrets come from the environment as ${NAME}
-# (or from a file via NAME_FILE=/path). A missing variable makes startup fail.
-api_token: "${TOP_SWITCH_API_TOKEN}"   # required; protects all of /api/*
+# Example config — fake values only (192.0.2.x is a documentation range). Copy to data/config.yaml and edit.
+# Secrets come from the environment as ${NAME} (or from a file via NAME_FILE=/path). A missing variable stops startup.
+api_token: "${TOP_SWITCH_API_TOKEN}"   # required; protects all of /api/* (it is the password of the page)
 timezone: Europe/Athens                # default: $TZ, else Europe/Athens
 
-plugins:
-  adguard:
+# What the switches talk to. Only AdGuard Home needs settings; http, webhook and script need none.
+integrations:
+  adguard:                             # needs AdGuard Home running as the DNS server of your network
     url: "${ADGUARD_URL}"              # e.g. http://host.docker.internal:3080
     username: "${ADGUARD_USERNAME}"
     password: "${ADGUARD_PASSWORD}"
 
+# One switch per device (on = no internet) + a master switch for the group. Uses the adguard integration.
+device_groups:
+  - id: kids
+    name: "Internet παιδιών"
+    icon: "📵"
+    integration: adguard
+    confirm: "Να κοπεί το internet σε όλες τις συσκευές;"   # asked before blocking (never before unblocking)
+    devices:                            # plain IPv4 only; give these devices a fixed IP (DHCP reservation)
+      - {id: living-tv, name: "TV σαλονιού", ip: 192.0.2.10, icon: "📺"}
+      - {id: tablet,    name: "Tablet",      ip: 192.0.2.11, icon: "📱"}
+
 buttons:
+  # One AdGuard toggle for several devices at once, on a schedule (integration: adguard).
   - id: reading-time
     name: "Ώρα διαβάσματος"
     icon: "📚"
@@ -18,34 +31,31 @@ buttons:
       on:
         type: plugin
         plugin: adguard.block
-        selector: &kids                # static selector; the API never accepts devices from the client
-          ids: ["192.0.2.10", "192.0.2.11"]                     # plain IPv4 only (no MAC, CIDR, IPv6 or ClientID)
-          clients: ["Example Persistent Client"]                # persistent client names (all their ids must be plain IPv4)
-      off:
-        type: plugin
-        plugin: adguard.unblock        # removes only the user rules this button added (tracked in state.json)
-      status:
-        type: plugin
-        plugin: adguard.status
-        selector: *kids
-    schedule:                          # every day 17:00-20:00 on, then off
-      - days: [mon, tue, wed, thu, fri, sat, sun]
-        on: "17:00"
-        off: "20:00"
+        selector: &readers               # static; the API never accepts devices from the client
+          ids: ["192.0.2.20", "192.0.2.21"]                     # plain IPv4 only (no MAC, CIDR, IPv6 or ClientID)
+          clients: ["Example Persistent Client"]                # AdGuard persistent clients (all their ids plain IPv4)
+      off: {type: plugin, plugin: adguard.unblock}              # removes only the rules this toggle added
+      status: {type: plugin, plugin: adguard.status, selector: *readers}
+    schedule:                           # weekdays 17:00-20:00 on, then off; a manual press wins until the next change
+      - {days: [mon, tue, wed, thu, fri], on: "17:00", off: "20:00"}
+
+  # A one-shot button that calls a webhook (integration: webhook).
+  - id: notify
+    name: "Ειδοποίηση"
+    icon: "🔔"
+    action: {type: plugin, plugin: webhook.call, method: POST, url: "http://hooks.example/x", body: {a: 1}}
 
   # More examples (uncomment):
-  # - id: lamp
+  # - id: lamp                                   # integration: http (e.g. a smart plug)
   #   name: Lamp
   #   icon: "💡"
+  #   labels: {on: "Αναμμένο", off: "Σβηστό"}
   #   toggle:
   #     on:  {type: http, method: POST, url: "http://lamp.example/on"}
   #     off: {type: http, method: POST, url: "http://lamp.example/off"}
   #     status: {type: http, url: "http://lamp.example/state", json_path: "power.state", on_value: "ON", off_value: "OFF"}
-  # - id: backup
+  # - id: backup                                 # integration: script
   #   name: Backup now
   #   icon: "💾"
   #   confirm: true
-  #   action: {type: script, script: backup.sh}      # file inside scripts/, no shell, no arguments
-  # - id: notify
-  #   name: Notify
-  #   action: {type: plugin, plugin: webhook.call, method: POST, url: "http://hooks.example/x", body: {a: 1}}
+  #   action: {type: script, script: backup.sh}  # file inside scripts/, no shell, no arguments
